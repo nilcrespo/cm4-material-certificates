@@ -16,7 +16,3 @@ app/static/fonts/*.woff2
 app/static/fonts/*.woff
 app/static/fonts/*.ttf
 app/static/fonts/*.otf
-
-# CM4's own logo (from cm4.es) - their trademark, kept out of the public repository.
-# The top bar falls back to the text "CM4" when these files are missing.
-app/static/brand/
