@@ -1,0 +1,18 @@
+# Local environment
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# Confidential client/supplier data - never commit (see tests/conftest.py: tests needing it skip)
+examples/
+problem-brief.md
+
+# Runtime state
+app/data/confirmed_pairs.json
+
+# Licensed font files (see app/static/fonts/README.md)
+app/static/fonts/*.woff2
+app/static/fonts/*.woff
+app/static/fonts/*.ttf
+app/static/fonts/*.otf

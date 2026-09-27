@@ -1,0 +1,80 @@
+# Material-standard equivalence reference table.
+#
+# Each group is one real material under different naming systems. `family`
+# distinguishes two EN designations for the *same* standard (en_name vs.
+# en_werkstoff - not a judgment call, always equivalent) from a designation
+# under a different standards body entirely (external, e.g. AISI/ASTM) -
+# equivalent in practice, but a real quality judgment call the first time
+# CM4 sees that specific pair. See design.md's "Result outcome model" decision.
+groups:
+  - canonical: S235JR
+    members:
+      - value: "S235JR"
+        family: en_name
+      - value: "1.0038"
+        family: en_werkstoff
+
+  - canonical: S355MC
+    members:
+      - value: "S355MC"
+        family: en_name
+      - value: "1.0976"
+        family: en_werkstoff
+
+  - canonical: X5CrNi18-10
+    members:
+      - value: "X5CrNi18-10"
+        family: en_name
+      - value: "1.4301"
+        family: en_werkstoff
+      - value: "AISI 304"
+        family: external
+
+  - canonical: X5CrNiMo17-12-2
+    members:
+      - value: "X5CrNiMo17-12-2"
+        family: en_name
+      - value: "1.4404"
+        family: en_werkstoff
+      - value: "AISI 316L"
+        family: external
+
+  - canonical: EN AW-5052
+    members:
+      - value: "EN AW-5052"
+        family: en_name
+      - value: "5052"
+        family: en_name
+      - value: "AlMg2.5"
+        family: external
+
+  - canonical: EN AW-6082
+    members:
+      - value: "EN AW-6082"
+        family: en_name
+      - value: "6082"
+        family: en_name
+
+  # Added after seeing them in CM4's real M009 BOM and the matching EBRO
+  # certificates during v1 validation - see README.md's known-gaps note on
+  # growing this table as new materials are seen.
+  - canonical: EN AW-5754
+    members:
+      - value: "EN AW-5754"
+        family: en_name
+      - value: "5754"
+        family: en_name
+
+  - canonical: EN AW-6063
+    members:
+      - value: "EN AW-6063"
+        family: en_name
+      - value: "6063"
+        family: en_name
+
+  - canonical: EN AW-6026
+    members:
+      - value: "EN AW-6026"
+        family: en_name
+      - value: "6026"
+        family: en_name

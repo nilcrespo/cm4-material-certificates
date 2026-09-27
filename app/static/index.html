@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title data-i18n="app.title">CM4 · Verificació de certificats de material</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><strong>CM4</strong> <span data-i18n="brand.name"></span></div>
+    <div class="lang-switch" role="group" data-i18n-attr="aria-label:lang.label">
+      <button type="button" data-lang="ca">CA</button><span aria-hidden="true">|</span><button type="button" data-lang="es">ES</button>
+    </div>
+  </header>
+
+  <nav class="view-tabs" role="tablist">
+    <button type="button" role="tab" data-view="verify" data-i18n="tab.verify"></button>
+    <button type="button" role="tab" data-view="history" data-i18n="tab.history"></button>
+  </nav>
+
+  <main>
+    <!-- Verify view -->
+    <section id="view-verify" class="view">
+      <h1 data-i18n="upload.heading"></h1>
+      <p class="muted" data-i18n="upload.lead"></p>
+
+      <form id="upload-form" class="inputs" novalidate>
+        <div class="input-row" id="bom-row">
+          <div class="input-label">
+            <span data-i18n="dz.bom.title"></span>
+            <span class="req" data-i18n="badge.required"></span>
+          </div>
+          <div class="input-formats muted" data-i18n="dz.bom.formats"></div>
+          <label class="btn-secondary">
+            <input id="bom-input" type="file" accept=".xlsx,.csv" hidden />
+            <span data-i18n="btn.choose"></span>
+          </label>
+          <div class="input-file" id="bom-filename"></div>
+        </div>
+
+        <div class="input-row" id="certs-row">
+          <div class="input-label">
+            <span data-i18n="dz.certs.title"></span>
+            <span class="req" data-i18n="badge.required"></span>
+          </div>
+          <div class="input-formats muted" data-i18n="dz.certs.formats"></div>
+          <label class="btn-secondary">
+            <input id="certs-input" type="file" webkitdirectory multiple hidden />
+            <span data-i18n="btn.choose"></span>
+          </label>
+          <div class="input-file" id="certs-filename"></div>
+        </div>
+
+        <div class="input-row" id="correspondence-row">
+          <div class="input-label">
+            <span data-i18n="dz.corr.title"></span>
+            <span class="opt" data-i18n="badge.optional"></span>
+          </div>
+          <div class="input-formats muted" data-i18n="dz.corr.formats"></div>
+          <label class="btn-secondary">
+            <input id="correspondence-input" type="file" accept=".xlsx,.csv" hidden />
+            <span data-i18n="btn.choose"></span>
+          </label>
+          <div class="input-file" id="correspondence-filename"></div>
+        </div>
+
+        <p class="hint muted" data-i18n-html="upload.hint_html"></p>
+        <p id="form-error" class="error" role="alert" hidden></p>
+
+        <div class="form-actions">
+          <button id="submit-btn" type="submit" class="btn-primary" data-i18n="btn.run"></button>
+          <ol class="stages" id="stages" hidden>
+            <li data-stage="read"><span data-i18n="stage.read"></span><span class="stage-detail"></span></li>
+            <li data-stage="verify"><span data-i18n="stage.verify"></span><span class="stage-detail"></span></li>
+            <li data-stage="prepare"><span data-i18n="stage.prepare"></span><span class="stage-detail"></span></li>
+          </ol>
+        </div>
+      </form>
+
+      <section id="results" class="results" hidden>
+        <div class="results-bar">
+          <div class="status-tabs" id="status-tabs" role="tablist"></div>
+          <a id="export-link" class="link" href="#" data-i18n="export.btn"></a>
+        </div>
+        <p id="saved-note" class="muted small" hidden></p>
+
+        <div class="table-scroll">
+          <table class="grid">
+            <thead>
+              <tr>
+                <th data-i18n="th.reference"></th>
+                <th data-i18n="th.specified"></th>
+                <th data-i18n="th.extracted"></th>
+                <th data-i18n="th.certificate"></th>
+                <th data-i18n="th.cert_type"></th>
+                <th data-i18n="th.result"></th>
+                <th data-i18n="th.action"></th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+
+        <div id="orphans" class="orphans" hidden>
+          <h2 data-i18n="orphans.title"></h2>
+          <p class="muted small" data-i18n="orphans.hint"></p>
+          <ul id="orphans-list" class="mono-list"></ul>
+        </div>
+      </section>
+    </section>
+
+    <!-- History view -->
+    <section id="view-history" class="view" hidden>
+      <h1 data-i18n="history.heading"></h1>
+      <p class="muted" data-i18n="history.lead"></p>
+      <div class="history-bar">
+        <div class="small"><span class="muted" data-i18n="history.folder"></span> <code id="history-folder"></code></div>
+        <button type="button" class="btn-secondary" id="history-refresh" data-i18n="history.refresh"></button>
+      </div>
+      <input id="history-search" class="search" type="search" data-i18n-attr="placeholder:history.search_placeholder" />
+      <p id="history-status" class="muted small"></p>
+      <div id="history-list" class="history-list"></div>
+      <p id="history-ignored" class="muted small" hidden></p>
+    </section>
+  </main>
+
+  <footer class="footer muted small" data-i18n="footer.privacy"></footer>
+
+  <aside id="review-panel" class="review-panel" hidden>
+    <div class="review-header">
+      <h2 id="review-title" class="mono"></h2>
+      <button class="btn-close" id="review-close" type="button" data-i18n-attr="aria-label:review.close">✕</button>
+    </div>
+    <div id="review-body" class="review-body"></div>
+  </aside>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

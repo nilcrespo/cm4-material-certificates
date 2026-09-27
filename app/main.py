@@ -1,0 +1,244 @@
+import json
+import logging
+import uuid
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+from urllib.parse import quote
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from . import config
+from .config import DIRECT_LINK_SUPPLIERS
+from .export import RunMetadata, build_export_workbook, export_filename, save_export
+from .history import list_history
+from .i18n import DEFAULT_LANG, normalize_lang, translate
+from .models import OrphanCorrespondenceEntry, ReviewReason, Status, VerificationRecord
+from .pipeline import run_verification_stream, summarize
+from .preview import media_type_for, render_certificate_preview
+from .store import ConfirmedPairsStore
+from .verification import suggested_action_key
+
+logger = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+app = FastAPI(title="CM4 Material Certificate Verification")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_confirmed_store = ConfirmedPairsStore()
+_runs: dict[str, list[VerificationRecord]] = {}
+_run_certificates: dict[str, dict[str, bytes]] = {}
+_run_orphans: dict[str, list[OrphanCorrespondenceEntry]] = {}
+_run_texts: dict[str, dict[str, str]] = {}
+_run_metadata: dict[str, RunMetadata] = {}
+_run_saved_as: dict[str, str] = {}  # run id -> filename of its auto-saved export in EXPORTS_DIR
+
+
+def _autosave(run_id: str, lang: str) -> str | None:
+    """Write (or rewrite) the run's export into the history folder. A failed save must not
+    break verification or confirmation - the run is still on screen and downloadable - so it
+    is logged and reported to the client as `saved_as: null` instead of raised."""
+    metadata = _run_metadata[run_id]
+    filename = _run_saved_as.get(run_id) or export_filename(metadata, lang)
+    try:
+        content = build_export_workbook(_runs[run_id], _run_orphans.get(run_id, []), lang=lang, metadata=metadata)
+        save_export(content, config.EXPORTS_DIR, filename)
+    except OSError:
+        logger.exception("Could not save export for run %s to %s", run_id, config.EXPORTS_DIR)
+        return None
+    _run_saved_as[run_id] = filename
+    return filename
+
+
+def _record_to_dict(record: VerificationRecord) -> dict:
+    d = asdict(record)
+    d["status"] = record.status.value
+    d["reason"] = record.reason.value if record.reason else None
+    d["source"] = record.source.value if record.source else None
+    return d
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.post("/api/verify")
+async def verify(
+    bom: UploadFile = File(...),
+    certificates: list[UploadFile] = File(...),
+    correspondence: Optional[UploadFile] = File(None),
+    lang: str = Form("ca"),
+):
+    """Streams newline-delimited JSON: one progress event per real pipeline phase as it
+    actually happens (see pipeline.run_verification_stream), ending with a "done" event
+    carrying the same run_id/summary/records/config shape this endpoint used to return
+    directly - so the client's progress UI reflects real work instead of a fixed animation.
+    """
+    bom_bytes = await bom.read()
+    certificate_uploads = [(cert.filename, await cert.read()) for cert in certificates]
+
+    correspondence_bytes = None
+    correspondence_filename = None
+    if correspondence is not None and correspondence.filename:
+        correspondence_bytes = await correspondence.read()
+        correspondence_filename = correspondence.filename
+
+    lang = normalize_lang(lang)
+
+    def generate():
+        run_id = str(uuid.uuid4())
+        created_at = datetime.now()
+        try:
+            for event in run_verification_stream(
+                bom_bytes,
+                certificate_uploads,
+                confirmed_store=_confirmed_store,
+                correspondence_bytes=correspondence_bytes,
+                correspondence_filename=correspondence_filename,
+                bom_filename=bom.filename,
+            ):
+                if event["stage"] == "done":
+                    records = event["records"]
+                    orphans = event["orphan_correspondence_entries"]
+                    raw = event["raw_bytes_by_path"]
+                    _runs[run_id] = records
+                    _run_certificates[run_id] = raw
+                    _run_orphans[run_id] = orphans
+                    _run_texts[run_id] = event.get("certificate_texts", {})
+                    _run_metadata[run_id] = RunMetadata(
+                        run_id=run_id,
+                        created_at=created_at,
+                        bom_filename=bom.filename,
+                        certificate_count=len(raw),
+                        suppliers=sorted({path.split("/")[0] for path in raw if "/" in path}),
+                        correspondence_filename=correspondence_filename,
+                    )
+                    payload = {
+                        "stage": "done",
+                        "run_id": run_id,
+                        "summary": summarize(records),
+                        "records": [_record_to_dict(r) for r in records],
+                        "orphan_correspondence_entries": [asdict(o) for o in orphans],
+                        "config": {"direct_link_suppliers": sorted(DIRECT_LINK_SUPPLIERS)},
+                        "saved_as": _autosave(run_id, lang),
+                        "exports_dir": str(config.EXPORTS_DIR),
+                    }
+                else:
+                    payload = event
+                yield json.dumps(payload, ensure_ascii=False) + "\n"
+        except ValueError as exc:
+            # Bad input (e.g. a BOM without the expected columns): report it on the stream -
+            # the 200 status line has already been sent, so an HTTP error is no longer possible.
+            yield json.dumps({"stage": "error", "detail": str(exc)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str):
+    records = _runs.get(run_id)
+    if records is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    orphans = _run_orphans.get(run_id, [])
+    return {
+        "summary": summarize(records),
+        "records": [_record_to_dict(r) for r in records],
+        "orphan_correspondence_entries": [asdict(o) for o in orphans],
+    }
+
+
+@app.get("/api/runs/{run_id}/export")
+def export_run(run_id: str, lang: str = "ca"):
+    records = _runs.get(run_id)
+    if records is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    lang = normalize_lang(lang)
+    metadata = _run_metadata.get(run_id) or RunMetadata(run_id=run_id, created_at=datetime.now())
+    workbook_bytes = build_export_workbook(records, _run_orphans.get(run_id, []), lang=lang, metadata=metadata)
+    filename = export_filename(metadata, lang)
+    return Response(
+        content=workbook_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@app.get("/api/runs/{run_id}/certificate")
+def get_certificate(run_id: str, path: str):
+    certs = _run_certificates.get(run_id)
+    if certs is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    content = certs.get(path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Certificate not found in this run")
+    headers = {}
+    if not path.lower().endswith(".pdf"):
+        # Word files can't be shown inline - make the browser download them with their own name.
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(Path(path).name)}"
+    return Response(content=content, media_type=media_type_for(path), headers=headers)
+
+
+@app.get("/api/runs/{run_id}/certificate/preview")
+def preview_certificate(run_id: str, path: str):
+    certs = _run_certificates.get(run_id)
+    if certs is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    content = certs.get(path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Certificate not found in this run")
+    page = render_certificate_preview(path, content, _run_texts.get(run_id, {}).get(path, ""))
+    # The preview is shown in a sandboxed iframe; the CSP also forbids scripts outright.
+    return HTMLResponse(page, headers={"Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'"})
+
+
+@app.get("/api/history")
+def history():
+    return list_history(config.EXPORTS_DIR)
+
+
+class ConfirmRequest(BaseModel):
+    reference: str
+    resolution: str  # "ok" or "mismatch"
+    lang: str = "ca"
+
+
+@app.post("/api/runs/{run_id}/confirm")
+def confirm(run_id: str, body: ConfirmRequest):
+    records = _runs.get(run_id)
+    if records is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    record = next((r for r in records if r.reference == body.reference), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Reference not found in this run")
+    if record.certificate_filename is None:
+        raise HTTPException(status_code=400, detail="No certificate linked to this reference to confirm against")
+    if body.resolution not in ("ok", "mismatch"):
+        raise HTTPException(status_code=400, detail="resolution must be 'ok' or 'mismatch'")
+
+    if (
+        body.resolution == "ok"
+        and record.reason == ReviewReason.EQUIVALENCE
+        and record.equivalence_canonical
+    ):
+        _confirmed_store.confirm(
+            record.equivalence_canonical,
+            record.equivalence_specified_value,
+            record.equivalence_extracted_value,
+        )
+
+    record.status = Status.OK if body.resolution == "ok" else Status.MISMATCH
+    record.reason = None
+    record.human_confirmed = True
+
+    record.action_key, record.action_params = suggested_action_key(record)
+    record.suggested_action = translate(DEFAULT_LANG, record.action_key, **record.action_params)
+    saved_as = _autosave(run_id, normalize_lang(body.lang)) if run_id in _run_metadata else None
+
+    return {"summary": summarize(records), "record": _record_to_dict(record), "saved_as": saved_as}
