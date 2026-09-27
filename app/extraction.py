@@ -1,3 +1,4 @@
+import html
 import re
 import shutil
 import subprocess
@@ -95,7 +96,9 @@ def extract_via_ocr(pdf_path: Path, lang: str = "eng+spa") -> str:
         return "\n".join(texts)
 
 
-def extract_via_ocr_with_confidence(pdf_path: Path, lang: str = "eng+spa") -> tuple[str, list[tuple[int, int, float]]]:
+def extract_via_ocr_with_confidence(
+    pdf_path: Path, lang: str = "eng+spa", words_out: Optional[list] = None
+) -> tuple[str, list[tuple[int, int, float]]]:
     """Like extract_via_ocr, but also returns per-word (start, end, confidence)
     spans into the returned text, so a caller can look up how confidently OCR
     read a specific substring (e.g. the extracted grade) - see
@@ -115,17 +118,20 @@ def extract_via_ocr_with_confidence(pdf_path: Path, lang: str = "eng+spa") -> tu
             capture_output=True,
             check=True,
         )
-        return ocr_images_with_confidence(sorted(Path(tmpdir).glob("page*.png")), lang)
+        return ocr_images_with_confidence(sorted(Path(tmpdir).glob("page*.png")), lang, words_out)
 
 
-def ocr_images_with_confidence(images: list[Path], lang: str = "eng+spa") -> tuple[str, list[tuple[int, int, float]]]:
+def ocr_images_with_confidence(
+    images: list[Path], lang: str = "eng+spa", words_out: Optional[list] = None
+) -> tuple[str, list[tuple[int, int, float]]]:
     """OCR each image in order with Tesseract's TSV output, returning the joined text and
     per-word (start, end, confidence) spans into it - the shared core of the scanned-PDF
-    path and the image-only Word document path (see extract_via_ocr_with_confidence)."""
+    path and the image-only Word document path (see extract_via_ocr_with_confidence).
+    With `words_out`, also appends every word's position (see CertificateData.words)."""
     text_parts: list[str] = []
     spans: list[tuple[int, int, float]] = []
     offset = 0
-    for page in images:
+    for page_index, page in enumerate(images):
         result = subprocess.run(
             ["tesseract", str(page), "stdout", "-l", lang, "tsv"],
             capture_output=True,
@@ -138,11 +144,14 @@ def ocr_images_with_confidence(images: list[Path], lang: str = "eng+spa") -> tup
             continue
         header = lines[0].split("\t")
         prev_line_key = None
+        page_w = page_h = None
         for raw_line in lines[1:]:
             if not raw_line.strip():
                 continue
             fields = raw_line.split("\t")
             row = dict(zip(header, fields))
+            if row.get("level") == "1":  # the page itself - its size normalises word boxes
+                page_w, page_h = _int(row.get("width")), _int(row.get("height"))
             word = row.get("text", "").strip()
             if not word:
                 continue
@@ -160,10 +169,51 @@ def ocr_images_with_confidence(images: list[Path], lang: str = "eng+spa") -> tup
             offset += len(word)
             if conf >= 0:
                 spans.append((start, offset, conf))
+            if words_out is not None and page_w and page_h:
+                left, top = _int(row.get("left")), _int(row.get("top"))
+                width, height = _int(row.get("width")), _int(row.get("height"))
+                words_out.append(
+                    (word, page_index, left / page_w, top / page_h, (left + width) / page_w, (top + height) / page_h)
+                )
             prev_line_key = line_key
         text_parts.append("\n")
         offset += 1
     return "".join(text_parts), spans
+
+
+def _int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+_BBOX_PAGE_RE = re.compile(r'<page width="([\d.]+)" height="([\d.]+)">')
+_BBOX_WORD_RE = re.compile(
+    r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>'
+)
+
+
+def extract_text_layer_words(pdf_path: Path) -> list[tuple]:
+    """Word positions from a PDF's text layer (`pdftotext -bbox`), in the same shape as the
+    OCR path's (see CertificateData.words)."""
+    result = subprocess.run(["pdftotext", "-bbox", str(pdf_path), "-"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return []
+    words = []
+    page_index, width, height = -1, 1.0, 1.0
+    for line in result.stdout.splitlines():
+        page = _BBOX_PAGE_RE.search(line)
+        if page:
+            page_index += 1
+            width, height = float(page.group(1)) or 1.0, float(page.group(2)) or 1.0
+            continue
+        word = _BBOX_WORD_RE.search(line)
+        if word and page_index >= 0:
+            x0, y0, x1, y1 = (float(word.group(i)) for i in range(1, 5))
+            text = html.unescape(word.group(5))
+            words.append((text, page_index, x0 / width, y0 / height, x1 / width, y1 / height))
+    return words
 
 
 def extract_docx_text(path: Path) -> str:
@@ -289,7 +339,9 @@ def parse_lot_number(text: str) -> str | None:
     return None
 
 
-def _read_certificate_text(path: Path) -> tuple[str, ExtractionSource, list[tuple[int, int, float]]]:
+def _read_certificate_text(
+    path: Path, words: list
+) -> tuple[str, ExtractionSource, list[tuple[int, int, float]]]:
     suffix = path.suffix.lower()
     if suffix == ".docx":
         text = extract_docx_text(path)
@@ -300,15 +352,16 @@ def _read_certificate_text(path: Path) -> tuple[str, ExtractionSource, list[tupl
             images = docx_images(path, Path(tmpdir))
             if not images:
                 return text, ExtractionSource.TEXT_LAYER, []
-            ocr_text, spans = ocr_images_with_confidence(images)
+            ocr_text, spans = ocr_images_with_confidence(images)  # no page view for Word: no boxes
             return ocr_text, ExtractionSource.OCR, spans
     if suffix == ".doc":
         return extract_doc_text(path), ExtractionSource.TEXT_LAYER, []
 
     text = extract_text_layer(path)
     if has_text_layer(text):
+        words.extend(extract_text_layer_words(path))
         return text, ExtractionSource.TEXT_LAYER, []
-    ocr_text, spans = extract_via_ocr_with_confidence(path)
+    ocr_text, spans = extract_via_ocr_with_confidence(path, words_out=words)
     return ocr_text, ExtractionSource.OCR, spans
 
 
@@ -321,7 +374,8 @@ def extract_certificate(pdf_path: Path, supplier: str, relative_path: str) -> Ce
     only the recorded `source` differs, which downstream logic uses to force any
     OCR-derived result into review.
     """
-    text, source, word_spans = _read_certificate_text(pdf_path)
+    words: list = []
+    text, source, word_spans = _read_certificate_text(pdf_path, words)
 
     grade_match = _match_grade(text)
     grade = _clean_match(grade_match.group(0).strip()) if grade_match else None
@@ -342,4 +396,5 @@ def extract_certificate(pdf_path: Path, supplier: str, relative_path: str) -> Ce
         lot_number=parse_lot_number(text),
         grade_confidence=grade_confidence,
         certificate_type=parse_certificate_type(text),
+        words=words,
     )

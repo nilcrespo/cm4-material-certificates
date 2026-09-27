@@ -7,133 +7,158 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><strong>CM4</strong> <span data-i18n="brand.name"></span></div>
-    <div class="lang-switch" role="group" data-i18n-attr="aria-label:lang.label">
-      <button type="button" data-lang="ca">CA</button><span aria-hidden="true">|</span><button type="button" data-lang="es">ES</button>
+  <header class="bar">
+    <div class="brand">CM4 <span data-i18n="brand.name"></span></div>
+    <nav class="view-tabs" role="tablist">
+      <button type="button" role="tab" data-view="verify" data-i18n="tab.verify"></button>
+      <button type="button" role="tab" data-view="history" data-i18n="tab.history"></button>
+    </nav>
+    <div class="bar-right">
+      <span class="privacy" data-i18n="privacy.short"></span>
+      <div class="lang-switch" role="group" data-i18n-attr="aria-label:lang.label">
+        <button type="button" data-lang="ca">CA</button><span aria-hidden="true">|</span><button type="button" data-lang="es">ES</button>
+      </div>
     </div>
   </header>
 
-  <nav class="view-tabs" role="tablist">
-    <button type="button" role="tab" data-view="verify" data-i18n="tab.verify"></button>
-    <button type="button" role="tab" data-view="history" data-i18n="tab.history"></button>
-  </nav>
+  <!-- ===================== Verify ===================== -->
+  <div id="view-verify" class="bench">
+    <aside class="rail">
+      <h2 class="eyebrow" data-i18n="rail.inputs"></h2>
 
-  <main>
-    <!-- Verify view -->
-    <section id="view-verify" class="view">
-      <h1 data-i18n="upload.heading"></h1>
-      <p class="muted" data-i18n="upload.lead"></p>
-
-      <form id="upload-form" class="inputs" novalidate>
-        <div class="input-row" id="bom-row">
-          <div class="input-label">
-            <span data-i18n="dz.bom.title"></span>
-            <span class="req" data-i18n="badge.required"></span>
+      <form id="upload-form" novalidate>
+        <div class="dz" id="dz-bom" data-kind="bom" tabindex="0">
+          <input id="bom-input" type="file" accept=".xlsx,.csv" hidden />
+          <div class="dz-head">
+            <span class="dz-ico" aria-hidden="true">▦</span>
+            <span class="dz-title" data-i18n="dz.bom.title"></span>
+            <span class="dz-tag" data-i18n="badge.required"></span>
+            <button type="button" class="dz-x" data-remove="bom" data-i18n-attr="title:dz.remove" hidden>✕</button>
           </div>
-          <div class="input-formats muted" data-i18n="dz.bom.formats"></div>
-          <label class="btn-secondary">
-            <input id="bom-input" type="file" accept=".xlsx,.csv" hidden />
-            <span data-i18n="btn.choose"></span>
-          </label>
-          <div class="input-file" id="bom-filename"></div>
+          <div class="dz-body" id="bom-body"></div>
         </div>
 
-        <div class="input-row" id="certs-row">
-          <div class="input-label">
-            <span data-i18n="dz.certs.title"></span>
-            <span class="req" data-i18n="badge.required"></span>
+        <div class="dz" id="dz-certs" data-kind="certs" tabindex="0">
+          <input id="certs-input" type="file" webkitdirectory multiple hidden />
+          <div class="dz-head">
+            <span class="dz-ico" aria-hidden="true">▤</span>
+            <span class="dz-title" data-i18n="dz.certs.title"></span>
+            <span class="dz-tag" data-i18n="badge.required"></span>
+            <button type="button" class="dz-x" data-remove="certs" data-i18n-attr="title:dz.remove" hidden>✕</button>
           </div>
-          <div class="input-formats muted" data-i18n="dz.certs.formats"></div>
-          <label class="btn-secondary">
-            <input id="certs-input" type="file" webkitdirectory multiple hidden />
-            <span data-i18n="btn.choose"></span>
-          </label>
-          <div class="input-file" id="certs-filename"></div>
+          <div class="dz-body" id="certs-body"></div>
         </div>
 
-        <div class="input-row" id="correspondence-row">
-          <div class="input-label">
-            <span data-i18n="dz.corr.title"></span>
-            <span class="opt" data-i18n="badge.optional"></span>
+        <div class="dz" id="dz-corr" data-kind="corr" tabindex="0">
+          <input id="correspondence-input" type="file" accept=".xlsx,.csv" hidden />
+          <div class="dz-head">
+            <span class="dz-ico" aria-hidden="true">⇄</span>
+            <span class="dz-title" data-i18n="dz.corr.title"></span>
+            <span class="dz-tag" data-i18n="badge.optional"></span>
+            <button type="button" class="dz-x" data-remove="corr" data-i18n-attr="title:dz.remove" hidden>✕</button>
           </div>
-          <div class="input-formats muted" data-i18n="dz.corr.formats"></div>
-          <label class="btn-secondary">
-            <input id="correspondence-input" type="file" accept=".xlsx,.csv" hidden />
-            <span data-i18n="btn.choose"></span>
-          </label>
-          <div class="input-file" id="correspondence-filename"></div>
+          <div class="dz-body" id="corr-body"></div>
         </div>
 
-        <p class="hint muted" data-i18n-html="upload.hint_html"></p>
-        <p id="form-error" class="error" role="alert" hidden></p>
+        <p id="form-error" class="form-error" role="alert" hidden></p>
 
-        <div class="form-actions">
-          <button id="submit-btn" type="submit" class="btn-primary" data-i18n="btn.run"></button>
-          <ol class="stages" id="stages" hidden>
-            <li data-stage="read"><span data-i18n="stage.read"></span><span class="stage-detail"></span></li>
-            <li data-stage="verify"><span data-i18n="stage.verify"></span><span class="stage-detail"></span></li>
-            <li data-stage="prepare"><span data-i18n="stage.prepare"></span><span class="stage-detail"></span></li>
-          </ol>
+        <button id="submit-btn" type="submit" class="btn btn-primary btn-block" data-i18n="btn.run"></button>
+        <div class="progress" id="progress" hidden>
+          <div class="track"><div class="fill" id="progress-fill"></div></div>
+          <div class="progress-label"><span id="progress-stage"></span><span id="progress-count"></span></div>
         </div>
       </form>
 
-      <section id="results" class="results" hidden>
-        <div class="results-bar">
-          <div class="status-tabs" id="status-tabs" role="tablist"></div>
-          <a id="export-link" class="link" href="#" data-i18n="export.btn"></a>
-        </div>
-        <p id="saved-note" class="muted small" hidden></p>
-
-        <div class="table-scroll">
-          <table class="grid">
-            <thead>
-              <tr>
-                <th data-i18n="th.reference"></th>
-                <th data-i18n="th.specified"></th>
-                <th data-i18n="th.extracted"></th>
-                <th data-i18n="th.certificate"></th>
-                <th data-i18n="th.cert_type"></th>
-                <th data-i18n="th.result"></th>
-                <th data-i18n="th.action"></th>
-              </tr>
-            </thead>
-            <tbody id="results-body"></tbody>
-          </table>
-        </div>
-
-        <div id="orphans" class="orphans" hidden>
-          <h2 data-i18n="orphans.title"></h2>
-          <p class="muted small" data-i18n="orphans.hint"></p>
-          <ul id="orphans-list" class="mono-list"></ul>
-        </div>
-      </section>
-    </section>
-
-    <!-- History view -->
-    <section id="view-history" class="view" hidden>
-      <h1 data-i18n="history.heading"></h1>
-      <p class="muted" data-i18n="history.lead"></p>
-      <div class="history-bar">
-        <div class="small"><span class="muted" data-i18n="history.folder"></span> <code id="history-folder"></code></div>
-        <button type="button" class="btn-secondary" id="history-refresh" data-i18n="history.refresh"></button>
+      <div class="rail-foot small">
+        <span class="muted" data-i18n="rail.saved_to"></span>
+        <span class="mono" id="exports-dir"></span>
       </div>
-      <input id="history-search" class="search" type="search" data-i18n-attr="placeholder:history.search_placeholder" />
-      <p id="history-status" class="muted small"></p>
-      <div id="history-list" class="history-list"></div>
-      <p id="history-ignored" class="muted small" hidden></p>
+    </aside>
+
+    <section class="main">
+      <!-- Before the first run -->
+      <div id="empty-state" class="empty">
+        <h1 data-i18n="empty.title"></h1>
+        <ol>
+          <li data-i18n="empty.step1"></li>
+          <li data-i18n="empty.step2"></li>
+          <li data-i18n="empty.step3"></li>
+        </ol>
+      </div>
+
+      <!-- Results -->
+      <div id="results" class="results" hidden>
+        <div class="runhead">
+          <div class="runhead-row">
+            <h1 id="run-title"></h1>
+            <span class="muted small" id="run-meta"></span>
+            <a id="export-link" class="btn" href="#" data-i18n="export.btn"></a>
+          </div>
+          <div class="stack" id="run-stack"></div>
+          <div class="stack-label small"><span id="run-resolved"></span><span class="muted" id="run-pending"></span></div>
+          <p class="small" id="saved-note" hidden></p>
+          <div class="status-tabs" id="status-tabs" role="tablist"></div>
+        </div>
+        <div class="toolbar">
+          <input id="results-search" class="search" type="search" data-i18n-attr="placeholder:history.search_placeholder" />
+          <span class="kbd-hint small muted">
+            <span data-i18n="kbd.hint"></span>
+            <span class="kbd">J</span>/<span class="kbd">K</span> <span data-i18n="kbd.nav"></span> ·
+            <span class="kbd">O</span> OK · <span class="kbd">D</span> <span data-i18n="status.mismatch"></span>
+          </span>
+        </div>
+
+        <div class="work" id="work">
+          <div class="table-wrap">
+            <table class="grid sortable" id="results-table">
+              <thead><tr id="results-head"></tr></thead>
+              <tbody id="results-body"></tbody>
+            </table>
+            <p class="no-rows muted" id="no-rows" hidden data-i18n="no_rows"></p>
+            <div id="orphans" class="orphans" hidden>
+              <h2 data-i18n="orphans.title"></h2>
+              <p class="muted small" data-i18n="orphans.hint"></p>
+              <ul id="orphans-list" class="mono-list"></ul>
+            </div>
+          </div>
+
+          <aside class="review" id="review" hidden>
+            <div class="rv-head">
+              <span class="rv-ref mono" id="rv-ref"></span>
+              <span class="small muted" id="rv-pos"></span>
+              <div class="rv-nav">
+                <button type="button" class="btn btn-icon" id="rv-prev" data-i18n-attr="title:review.prev">↑</button>
+                <button type="button" class="btn btn-icon" id="rv-next" data-i18n-attr="title:review.next">↓</button>
+                <button type="button" class="btn btn-icon" id="rv-close" data-i18n-attr="title:review.close_key">✕</button>
+              </div>
+            </div>
+            <div class="rv-body" id="rv-body"></div>
+            <div class="rv-actions" id="rv-actions"></div>
+          </aside>
+        </div>
+      </div>
     </section>
-  </main>
+  </div>
 
-  <footer class="footer muted small" data-i18n="footer.privacy"></footer>
-
-  <aside id="review-panel" class="review-panel" hidden>
-    <div class="review-header">
-      <h2 id="review-title" class="mono"></h2>
-      <button class="btn-close" id="review-close" type="button" data-i18n-attr="aria-label:review.close">✕</button>
+  <!-- ===================== History ===================== -->
+  <div id="view-history" class="page" hidden>
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="history.heading"></h1>
+        <p class="muted small" data-i18n="history.lead"></p>
+      </div>
+      <button type="button" class="btn" id="history-refresh" data-i18n="history.refresh"></button>
     </div>
-    <div id="review-body" class="review-body"></div>
-  </aside>
+    <div class="history-tools">
+      <input id="history-search" class="search" type="search" data-i18n-attr="placeholder:history.search_placeholder" />
+      <span class="small"><span class="muted" data-i18n="history.folder"></span> <span class="mono" id="history-folder"></span></span>
+    </div>
+    <p id="history-status" class="muted small"></p>
+    <div id="history-list" class="history-list"></div>
+    <p id="history-ignored" class="muted small" hidden></p>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
 
   <script src="/static/app.js"></script>
 </body>

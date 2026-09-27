@@ -21,17 +21,29 @@ def parse_bom(path: str | Path, sheet_name: str = "BOM") -> list[BomRow]:
     verification focus. A BOM with no `Categoría` column at all is not filtered by
     category (keeps this usable against simpler/synthetic BOMs).
     """
-    path = Path(path)
-    if path.suffix.lower() == ".csv":
-        rows = read_csv_rows(path.read_bytes())
-        source = "BOM CSV"
-    else:
-        wb = openpyxl.load_workbook(path, data_only=True)
-        # A BOM exported on its own often has a single, differently named sheet.
-        ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.worksheets[0]
-        rows = list(ws.iter_rows(values_only=True))
-        source = f"BOM sheet '{ws.title}'"
+    rows, source = _load_rows(Path(path), sheet_name)
     return _rows_to_bom(rows, source)
+
+
+def bom_summary(path: str | Path, sheet_name: str = "BOM") -> dict:
+    """What the upload form shows before any certificate is read: how many BOM rows have a
+    reference, and how many of them are in scope for verification. Raises ValueError (same
+    message as parse_bom) for a BOM without the expected columns."""
+    rows, source = _load_rows(Path(path), sheet_name)
+    in_scope = _rows_to_bom(rows, source)
+    header = [str(name).strip() if name is not None else None for name in rows[0]]
+    ref_idx = header.index(REFERENCE_COLUMN)
+    total = sum(1 for row in rows[1:] if row and ref_idx < len(row) and str(row[ref_idx] or "").strip())
+    return {"parts": len(in_scope), "rows": total, "category": TARGET_CATEGORY if CATEGORY_COLUMN in header else None}
+
+
+def _load_rows(path: Path, sheet_name: str) -> tuple[list, str]:
+    if path.suffix.lower() == ".csv":
+        return read_csv_rows(path.read_bytes()), "BOM CSV"
+    wb = openpyxl.load_workbook(path, data_only=True)
+    # A BOM exported on its own often has a single, differently named sheet.
+    ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.worksheets[0]
+    return list(ws.iter_rows(values_only=True)), f"BOM sheet '{ws.title}'"
 
 
 def _rows_to_bom(rows: list, source: str) -> list[BomRow]:

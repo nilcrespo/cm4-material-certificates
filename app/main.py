@@ -1,6 +1,10 @@
+import copy
 import json
 import logging
+import subprocess
+import tempfile
 import uuid
+import zipfile
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -14,10 +18,13 @@ from pydantic import BaseModel
 
 from . import config
 from .config import DIRECT_LINK_SUPPLIERS
+from .bom import bom_summary
+from .correspondence import parse_correspondence
 from .export import RunMetadata, build_export_workbook, export_filename, save_export
 from .history import list_history
 from .i18n import DEFAULT_LANG, normalize_lang, translate
-from .models import OrphanCorrespondenceEntry, ReviewReason, Status, VerificationRecord
+from .locate import locate
+from .models import CertificateData, OrphanCorrespondenceEntry, ReviewReason, Status, VerificationRecord
 from .pipeline import run_verification_stream, summarize
 from .preview import media_type_for, render_certificate_preview
 from .store import ConfirmedPairsStore
@@ -37,6 +44,11 @@ _run_orphans: dict[str, list[OrphanCorrespondenceEntry]] = {}
 _run_texts: dict[str, dict[str, str]] = {}
 _run_metadata: dict[str, RunMetadata] = {}
 _run_saved_as: dict[str, str] = {}  # run id -> filename of its auto-saved export in EXPORTS_DIR
+_run_cert_data: dict[str, dict[str, CertificateData]] = {}
+# Per run: stack of (reference, record before the decision, equivalence pair promoted by it or None)
+_run_undo: dict[str, list[tuple[str, VerificationRecord, Optional[tuple[str, str, str]]]]] = {}
+_page_cache: dict[tuple[str, str, int], bytes] = {}
+PAGE_DPI = 110
 
 
 def _autosave(run_id: str, lang: str) -> str | None:
@@ -53,6 +65,52 @@ def _autosave(run_id: str, lang: str) -> str | None:
         return None
     _run_saved_as[run_id] = filename
     return filename
+
+
+@app.get("/api/config")
+def get_config():
+    return {"exports_dir": str(config.EXPORTS_DIR)}
+
+
+def _preview_file(upload_name: str, content: bytes, default_suffix: str) -> Path:
+    suffix = Path(upload_name or "").suffix.lower() or default_suffix
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    handle.write(content)
+    handle.close()
+    return Path(handle.name)
+
+
+def _preview_error(exc: Exception, kind: str) -> HTTPException:
+    """422 with the raw message plus a catalog key the UI can show in the user's language."""
+    missing_columns = isinstance(exc, ValueError) and "missing expected columns" in str(exc)
+    return HTTPException(
+        status_code=422,
+        detail={"message": str(exc), "key": f"{kind}.missing_columns" if missing_columns else "file.unreadable"},
+    )
+
+
+@app.post("/api/preview/bom")
+async def preview_bom(bom: UploadFile = File(...)):
+    """Validate a BOM the moment it's picked - before any (slow) certificate OCR runs."""
+    path = _preview_file(bom.filename, await bom.read(), ".xlsx")
+    try:
+        return bom_summary(path)
+    except (ValueError, KeyError, OSError, zipfile.BadZipFile) as exc:
+        raise _preview_error(exc, "bom")
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@app.post("/api/preview/correspondence")
+async def preview_correspondence(correspondence: UploadFile = File(...)):
+    path = _preview_file(correspondence.filename, await correspondence.read(), ".xlsx")
+    try:
+        mapping = parse_correspondence(path)
+    except (ValueError, KeyError, OSError, zipfile.BadZipFile) as exc:
+        raise _preview_error(exc, "corr")
+    finally:
+        path.unlink(missing_ok=True)
+    return {"rows": len(mapping), "without_lote": sum(1 for lote in mapping.values() if lote is None)}
 
 
 def _record_to_dict(record: VerificationRecord) -> dict:
@@ -111,6 +169,7 @@ async def verify(
                     _run_certificates[run_id] = raw
                     _run_orphans[run_id] = orphans
                     _run_texts[run_id] = event.get("certificate_texts", {})
+                    _run_cert_data[run_id] = {c.path: c for c in event.get("certificates", [])}
                     _run_metadata[run_id] = RunMetadata(
                         run_id=run_id,
                         created_at=created_at,
@@ -192,9 +251,62 @@ def preview_certificate(run_id: str, path: str):
     content = certs.get(path)
     if content is None:
         raise HTTPException(status_code=404, detail="Certificate not found in this run")
-    page = render_certificate_preview(path, content, _run_texts.get(run_id, {}).get(path, ""))
+    cert = _run_cert_data.get(run_id, {}).get(path)
+    terms = [t for t in (cert.grade, cert.standard) if t] if cert else []
+    page = render_certificate_preview(path, content, _run_texts.get(run_id, {}).get(path, ""), terms)
     # The preview is shown in a sandboxed iframe; the CSP also forbids scripts outright.
     return HTMLResponse(page, headers={"Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'"})
+
+
+def _pdf_page_count(content: bytes) -> int:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+        handle.write(content)
+        handle.flush()
+        result = subprocess.run(["pdfinfo", handle.name], capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        if line.startswith("Pages:"):
+            return int(line.split()[1])
+    return 1
+
+
+@app.get("/api/runs/{run_id}/certificate/layout")
+def certificate_layout(run_id: str, path: str):
+    """Page count plus boxes around the extracted grade/standard/type, for the review viewer."""
+    content = _run_certificates.get(run_id, {}).get(path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Certificate not found in this run")
+    if not path.lower().endswith(".pdf"):
+        return {"pages": 0, "highlights": []}
+    cert = _run_cert_data.get(run_id, {}).get(path)
+    highlights = (
+        locate(cert.words, grade=cert.grade, standard=cert.standard, certificate_type=cert.certificate_type)
+        if cert
+        else []
+    )
+    return {"pages": _pdf_page_count(content), "highlights": highlights}
+
+
+@app.get("/api/runs/{run_id}/certificate/page")
+def certificate_page(run_id: str, path: str, n: int = 1):
+    """One PDF page as PNG. The review viewer shows these (with highlight overlays) instead of
+    the browser's PDF plugin, whose rendering and coordinates we can't draw on."""
+    content = _run_certificates.get(run_id, {}).get(path)
+    if content is None or not path.lower().endswith(".pdf"):
+        raise HTTPException(status_code=404, detail="Certificate not found in this run")
+    key = (run_id, path, n)
+    if key not in _page_cache:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "cert.pdf"
+            src.write_bytes(content)
+            subprocess.run(
+                ["pdftoppm", "-png", "-r", str(PAGE_DPI), "-f", str(n), "-l", str(n), "-singlefile", str(src), str(Path(tmp) / "page")],
+                capture_output=True,
+            )
+            out = Path(tmp) / "page.png"
+            if not out.exists():
+                raise HTTPException(status_code=404, detail="Page not found")
+            _page_cache[key] = out.read_bytes()
+    return Response(content=_page_cache[key], media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/api/history")
@@ -222,16 +334,18 @@ def confirm(run_id: str, body: ConfirmRequest):
     if body.resolution not in ("ok", "mismatch"):
         raise HTTPException(status_code=400, detail="resolution must be 'ok' or 'mismatch'")
 
+    before = copy.deepcopy(record)
+    promoted = None
     if (
         body.resolution == "ok"
         and record.reason == ReviewReason.EQUIVALENCE
         and record.equivalence_canonical
     ):
-        _confirmed_store.confirm(
-            record.equivalence_canonical,
-            record.equivalence_specified_value,
-            record.equivalence_extracted_value,
-        )
+        pair = (record.equivalence_canonical, record.equivalence_specified_value, record.equivalence_extracted_value)
+        if not _confirmed_store.is_confirmed(*pair):
+            promoted = pair
+        _confirmed_store.confirm(*pair)
+    _run_undo.setdefault(run_id, []).append((record.reference, before, promoted))
 
     record.status = Status.OK if body.resolution == "ok" else Status.MISMATCH
     record.reason = None
@@ -242,3 +356,28 @@ def confirm(run_id: str, body: ConfirmRequest):
     saved_as = _autosave(run_id, normalize_lang(body.lang)) if run_id in _run_metadata else None
 
     return {"summary": summarize(records), "record": _record_to_dict(record), "saved_as": saved_as}
+
+
+class UndoRequest(BaseModel):
+    reference: str
+    lang: str = "ca"
+
+
+@app.post("/api/runs/{run_id}/undo")
+def undo(run_id: str, body: UndoRequest):
+    """Revert the most recent decision on `reference` in this run (the review UI's undo toast),
+    including an equivalence pair that decision promoted, and re-save the export."""
+    records = _runs.get(run_id)
+    if records is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    stack = _run_undo.get(run_id, [])
+    index = next((i for i in range(len(stack) - 1, -1, -1) if stack[i][0] == body.reference), None)
+    if index is None:
+        raise HTTPException(status_code=400, detail="Nothing to undo for this reference")
+    _, before, promoted = stack.pop(index)
+    position = next(i for i, r in enumerate(records) if r.reference == body.reference)
+    records[position] = before
+    if promoted:
+        _confirmed_store.unconfirm(*promoted)
+    saved_as = _autosave(run_id, normalize_lang(body.lang)) if run_id in _run_metadata else None
+    return {"summary": summarize(records), "record": _record_to_dict(before), "saved_as": saved_as}

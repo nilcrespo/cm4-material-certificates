@@ -41,6 +41,14 @@ Word certificates: text is read directly from a `.docx`; a `.docx` that is only 
 image by image, with the same confidence trust check as a scanned PDF. Legacy `.doc` uses macOS
 `textutil`. The review panel shows Word certificates as a text+images preview with a download link.
 
+### Working through results
+
+Inputs can be dragged onto the left column or picked; the BOM (and correspondence document) is checked
+as soon as it's added, so a wrong file is caught before any OCR runs. After a run, click a part to open
+the review split: specified vs read material, the reason in plain words, and the certificate pages with
+the grade, standard and EN 10204 type outlined where they were read. Keyboard: `J`/`K` next/previous,
+`O` confirm OK, `D` mark discrepancy, `Esc` close. Every decision can be undone from the toast.
+
 ### Language
 
 The interface, suggested actions and Excel export are available in Catalan and Spanish (`CA | ES` in the

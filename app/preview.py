@@ -10,6 +10,8 @@ from io import BytesIO
 from pathlib import Path
 from xml.etree import ElementTree
 
+from .locate import mark_terms_in_html
+
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
@@ -26,6 +28,7 @@ body{{font:13px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#
 p{{margin:0 0 6px}} img{{max-width:100%;height:auto;display:block;margin:8px 0}}
 table{{border-collapse:collapse;margin:8px 0}} td{{border:1px solid #c9c9c4;padding:2px 6px;vertical-align:top}}
 pre{{white-space:pre-wrap;font:12px/1.4 ui-monospace,Menlo,monospace}}
+mark{{background:#fff1a6;outline:2px solid #e2b400;font-weight:700}}
 </style></head><body>{body}</body></html>"""
 
 
@@ -94,7 +97,7 @@ def _doc_body_html(content: bytes) -> str:
     return ""
 
 
-def render_certificate_preview(path: str, content: bytes, fallback_text: str = "") -> str:
+def render_certificate_preview(path: str, content: bytes, fallback_text: str = "", terms: list[str] | None = None) -> str:
     """A self-contained HTML page showing a Word certificate's text and images, for the review
     panel (browsers can't embed .docx/.doc the way they embed PDFs). Falls back to the text
     extracted during verification when the document can't be rendered."""
@@ -109,4 +112,6 @@ def render_certificate_preview(path: str, content: bytes, fallback_text: str = "
         body = ""
     if not body.strip():
         body = f"<pre>{html.escape(fallback_text)}</pre>"
+    if terms:
+        body = mark_terms_in_html(body, terms)
     return _PAGE.format(body=body)

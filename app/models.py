@@ -52,6 +52,10 @@ class CertificateData:
     lot_number: Optional[str] = None
     grade_confidence: Optional[float] = None  # 0-100, OCR-sourced only; see equivalence.is_reading_trustworthy
     certificate_type: Optional[str] = None  # EN 10204 inspection-document type, e.g. "3.1", "2.2"
+    # Every word with its position, for highlighting extracted values on the page in the review
+    # UI: (text, page index from 0, x0, y0, x1, y1) with coordinates as 0-1 fractions of the page.
+    # Empty for Word documents (their preview marks terms in HTML instead).
+    words: list = field(default_factory=list)
 
 
 @dataclass
@@ -95,6 +99,10 @@ class VerificationRecord:
     # field yet - see README's "Known gaps". Wired through the model/export so it can be
     # populated the moment a real source is added, without another schema change.
     committed_material: Optional[str] = None
+    # Display-only context for the review UI: how the certificate was linked (see
+    # matching.STRATEGY_*) and, for OCR readings, the grade's OCR confidence (0-100).
+    match_strategy: Optional[str] = None
+    grade_confidence: Optional[float] = None
     # Language-independent form of `suggested_action` / `certificate_type_warning`: a key into
     # the shared catalog (static/i18n.json) plus its placeholder values, so the UI and export
     # can render either in Catalan or Spanish. The plain-text fields above stay filled (in

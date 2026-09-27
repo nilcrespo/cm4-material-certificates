@@ -62,3 +62,22 @@ def test_docx_preview_has_text_and_images_and_no_scripts():
 def test_unreadable_word_file_falls_back_to_extracted_text():
     page = render_certificate_preview("SUP/cert.docx", b"not a zip", fallback_text="S235JR")
     assert "S235JR" in page
+
+
+def test_certificate_layout_and_page_for_a_real_scan(examples_dir, verify_result):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    bom = examples_dir / "EBRO" / "M009_BOM.xlsx"
+    cert = examples_dir / "EBRO" / "unzipped" / "11703780002" / "ZA34683.pdf"
+    body = verify_result(client.post(
+        "/api/verify",
+        files=[("bom", ("M009_BOM.xlsx", bom.read_bytes())), ("certificates", ("EBRO/x/ZA34683.pdf", cert.read_bytes()))],
+    ))
+    layout = client.get(f"/api/runs/{body['run_id']}/certificate/layout", params={"path": "EBRO/x/ZA34683.pdf"}).json()
+    assert layout["pages"] >= 1
+    assert {h["kind"] for h in layout["highlights"]} >= {"grade", "type"}
+    page = client.get(f"/api/runs/{body['run_id']}/certificate/page", params={"path": "EBRO/x/ZA34683.pdf", "n": 1})
+    assert page.status_code == 200 and page.content.startswith(b"\x89PNG")

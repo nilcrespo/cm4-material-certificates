@@ -179,3 +179,50 @@ def test_bad_bom_is_reported_on_the_stream(tmp_path):
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
     assert events[-1]["stage"] == "error"
     assert "Nº de pieza" in events[-1]["detail"]
+
+
+def test_bom_and_correspondence_previews(tmp_path):
+    bom_path = tmp_path / "bom.xlsx"
+    _make_bom(bom_path, [("A-1", "S235JR"), ("A-2", "S355JR")])
+    ok = client.post("/api/preview/bom", files={"bom": ("bom.xlsx", bom_path.read_bytes())})
+    assert ok.status_code == 200 and ok.json()["parts"] == 2
+
+    bad = client.post("/api/preview/bom", files={"bom": ("bom.csv", "Ref;Mat\nA;B\n".encode())})
+    assert bad.status_code == 422
+    assert bad.json()["detail"]["key"] == "bom.missing_columns"
+    assert "Nº de pieza" in bad.json()["detail"]["message"]
+
+    corr = client.post(
+        "/api/preview/correspondence",
+        files={"correspondence": ("c.csv", "ClientRef;Lote\nA-1;ZA1\nA-2;\n".encode())},
+    )
+    assert corr.json() == {"rows": 2, "without_lote": 1}
+
+
+def test_undo_restores_previous_state_and_unpromotes_pair(tmp_path, monkeypatch, isolated_confirmed_store, verify_result):
+    bom_path = tmp_path / "bom.xlsx"
+    _make_bom(bom_path, [("REF-EQUIV", "EN 10088-1:1995 X5CrNi18-10")])
+    fake_cert = CertificateData(
+        path="SUPPLIER/cert.pdf", supplier="SUPPLIER", text="", source=ExtractionSource.TEXT_LAYER, grade="AISI 304"
+    )
+    monkeypatch.setattr(pipeline, "extract_certificate", lambda *a, **k: fake_cert)
+    body = verify_result(client.post(
+        "/api/verify",
+        files={
+            "bom": ("bom.xlsx", bom_path.read_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            "certificates": ("SUPPLIER/cert.pdf", b"%PDF-1.4 fake", "application/pdf"),
+        },
+    ))
+    run_id = body["run_id"]
+    client.post(f"/api/runs/{run_id}/confirm", json={"reference": "REF-EQUIV", "resolution": "ok"})
+    assert len(_confirmed_store._confirmed) == 1
+
+    undone = client.post(f"/api/runs/{run_id}/undo", json={"reference": "REF-EQUIV"})
+
+    assert undone.status_code == 200
+    assert undone.json()["record"]["status"] == "needs_review"
+    assert undone.json()["record"]["reason"] == "equivalence"
+    assert undone.json()["record"]["human_confirmed"] is False
+    assert len(_confirmed_store._confirmed) == 0
+    assert client.get("/api/history").json()["runs"][0]["summary"]["needs_review"] == 1
+    assert client.post(f"/api/runs/{run_id}/undo", json={"reference": "REF-EQUIV"}).status_code == 400

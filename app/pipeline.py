@@ -232,6 +232,7 @@ def run_verification_stream(
         "records": records,
         "raw_bytes_by_path": raw_bytes_by_path,
         "certificate_texts": {c.path: c.text for c in certificates},
+        "certificates": certificates,
         "orphan_correspondence_entries": orphans,
     }
 

@@ -129,6 +129,7 @@ def _build_record(
             status=Status.NEEDS_REVIEW,
             reason=ReviewReason.AMBIGUOUS_MATCH,
             candidates=[c.path for c in outcome.candidates],
+            match_strategy=outcome.strategy,
             specified_norma=specified_norma,
             specified_grade=specified_grade,
         )
@@ -185,6 +186,8 @@ def _build_record(
         certificate_type_warning=certificate_type_warning,
         warning_key=warning_key,
         warning_params=warning_params,
+        match_strategy=outcome.strategy,
+        grade_confidence=cert.grade_confidence,
     )
 
     # A non-3.1 certificate takes priority over the generic OCR-trust check when the material

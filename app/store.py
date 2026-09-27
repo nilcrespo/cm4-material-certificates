@@ -42,3 +42,8 @@ class ConfirmedPairsStore:
     def confirm(self, canonical: str, value_a: str, value_b: str) -> None:
         self._confirmed.add(_pair_key(canonical, value_a, value_b))
         self._save()
+
+    def unconfirm(self, canonical: str, value_a: str, value_b: str) -> None:
+        """Undo a confirmation made by mistake (the review UI's "undo")."""
+        self._confirmed.discard(_pair_key(canonical, value_a, value_b))
+        self._save()
