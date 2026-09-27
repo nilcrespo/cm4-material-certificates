@@ -4,11 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="app.title">CM4 · Verificació de certificats de material</title>
+  <link rel="icon" type="image/png" href="/static/brand/cm4-logo-green.png" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <header class="bar">
-    <div class="brand">CM4 <span data-i18n="brand.name"></span></div>
+    <div class="brand">
+      <img src="/static/brand/cm4-logo-white.png" alt="CM4" onerror="this.parentElement.classList.add('no-logo'); this.remove()" />
+      <span class="brand-fallback">CM4</span>
+      <span data-i18n="brand.name"></span>
+    </div>
     <nav class="view-tabs" role="tablist">
       <button type="button" role="tab" data-view="verify" data-i18n="tab.verify"></button>
       <button type="button" role="tab" data-view="history" data-i18n="tab.history"></button>

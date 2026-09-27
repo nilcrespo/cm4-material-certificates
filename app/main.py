@@ -37,6 +37,17 @@ STATIC_DIR = Path(__file__).parent / "static"
 app = FastAPI(title="CM4 Material Certificate Verification")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+
+@app.middleware("http")
+async def revalidate_app_files(request, call_next):
+    """Make browsers re-check the page, scripts and styles on every load (a cheap 304 when
+    unchanged) - otherwise an update can leave a cached old app.js talking to a new server,
+    or the other way round."""
+    response = await call_next(request)
+    if request.url.path == "/" or (request.url.path.startswith("/static/") and not request.url.path.startswith("/static/fonts/")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 _confirmed_store = ConfirmedPairsStore()
 _runs: dict[str, list[VerificationRecord]] = {}
 _run_certificates: dict[str, dict[str, bytes]] = {}

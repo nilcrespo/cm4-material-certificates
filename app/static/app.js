@@ -661,7 +661,7 @@ async function loadViewer(record) {
   pages.innerHTML = Array.from({ length: layout.pages }, (_, i) => {
     const boxes = layout.highlights.filter((h) => h.page === i).map((h) =>
       `<span class="hl hl-${h.kind}" style="left:${h.x0 * 100}%;top:${h.y0 * 100}%;width:${(h.x1 - h.x0) * 100}%;height:${(h.y1 - h.y0) * 100}%"></span>`).join("");
-    return `<figure class="doc-page"><div class="page-img"><img loading="lazy" alt="${escapeHtml(t("review.page", { n: i + 1, total: layout.pages }))}"
+    return `<figure class="doc-page"><div class="page-img"><img loading="${i === 0 || boxes ? "eager" : "lazy"}" onload="this.parentElement.classList.add('is-loaded')" alt="${escapeHtml(t("review.page", { n: i + 1, total: layout.pages }))}"
         src="/api/runs/${run.id}/certificate/page?path=${path}&n=${i + 1}">${boxes}</div>
         <figcaption class="small muted">${escapeHtml(t("review.page", { n: i + 1, total: layout.pages }))}</figcaption></figure>`;
   }).join("");
